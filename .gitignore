@@ -1,0 +1,3 @@
+﻿modo/src/lxsdk/*.cpp
+modo/include/lxsdk/lx*
+.vscode/*

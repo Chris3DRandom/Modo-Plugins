@@ -1,0 +1,1 @@
+add_modo_plugin(thicknessChecker "thickness.cxx")

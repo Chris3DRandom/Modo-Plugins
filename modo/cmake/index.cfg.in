@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<configuration kit="@KIT_NAME@">
+
+<import>kit_@KIT_NAME@:</import>
+
+<atom type="Extensions64">
+  <list type="AutoScan">win64</list>
+</atom>
+	
+</configuration>

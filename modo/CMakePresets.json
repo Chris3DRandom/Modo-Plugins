@@ -1,0 +1,72 @@
+{
+    "version": 5,
+    "cmakeMinimumRequired": {
+      "major": 3,
+      "minor": 26,
+      "patch": 0
+    },
+    "configurePresets": [
+      {
+        "name": "base",
+        "hidden": true,
+        "binaryDir": "${sourceDir}/_build/${presetName}",
+        "cacheVariables": {
+          "CMAKE_INSTALL_PREFIX": "${sourceDir}/Builds/${presetName}",
+          "CMAKE_C_COMPILER": "cl",
+          "CMAKE_CXX_COMPILER": "cl",
+          "CMAKE_EXPORT_COMPILE_COMMANDS": true
+        }
+      },
+      {
+        "name": "Debug",
+        "inherits": [
+          "base"
+        ],
+        "displayName": "Debug",
+        "description": "Debug build.",
+        "cacheVariables": {
+          "CMAKE_BUILD_TYPE": "Debug"
+        }
+      },
+      {
+        "name": "RelWithDebInfo",
+        "inherits": [
+          "base"
+        ],
+        "displayName": "RelWithDebInfo",
+        "description": "Release With Debug Information.",
+        "cacheVariables": {
+          "CMAKE_BUILD_TYPE": "RelWithDebInfo"
+        }
+      },
+      {
+        "name": "Release",
+        "inherits": [
+          "base"
+        ],
+        "displayName": "Release",
+        "description": "Release build.",
+        "cacheVariables": {
+          "CMAKE_BUILD_TYPE": "Release"
+        }
+      }
+    ],
+    "buildPresets": [
+      {
+        "name": "Debug",
+        "configurePreset": "Debug",
+        "configuration": "Debug"
+      },
+      {
+        "name": "RelWithDebInfo",
+        "configurePreset": "RelWithDebInfo",
+        "configuration": "RelWithDebInfo"
+      },
+      {
+        "name": "Release",
+        "configurePreset": "Release",
+        "configuration": "Release"
+      }
+    ]
+  }
+  
