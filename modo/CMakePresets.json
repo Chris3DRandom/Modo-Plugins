@@ -10,8 +10,14 @@
         "name": "base",
         "hidden": true,
         "binaryDir": "${sourceDir}/_build/${presetName}",
+        "generator": "Ninja",
+        "architecture": {
+          "value": "x64",
+          "strategy": "external"
+        },
         "cacheVariables": {
           "CMAKE_INSTALL_PREFIX": "${sourceDir}/Builds/${presetName}",
+          "CMAKE_MAKE_PROGRAM": "C:/bin/ninja.exe",
           "CMAKE_C_COMPILER": "cl",
           "CMAKE_CXX_COMPILER": "cl",
           "CMAKE_EXPORT_COMPILE_COMMANDS": true

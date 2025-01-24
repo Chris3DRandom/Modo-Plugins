@@ -1,12 +1,13 @@
 #pragma once
 
 // For whatever reason, some of the modeling tool packets never had wrappers exposed.
-// This header adds wrappers for writing direct modeling falloffs, action centers, and
-// action axes.
-
+// This header adds glue for writing direct modeling falloffs through the SDK.
 #include <lxsdk/lx_wrap.hpp>
 #include <lxsdk/lxw_tool.hpp>
 
+// Tools which read the falloff packet expect to compute a weight for a given position, vertex, or polygon.
+// If the tool operates in 3D space it will call the packet's Evaluate function.  If it's a screen space
+// tool, then the Screen function will be called instead.
 class CLxImpl_FalloffPacket
 {
 public:

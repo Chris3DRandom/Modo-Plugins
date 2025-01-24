@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<configuration>
+  <atom type="Filters">
+    <hash type="Preset" key="@TOOL_NAME@:filterPreset">
+      <atom type="Name">@TOOL_NAME@</atom>
+      <atom type="Category">95043940005:filterCat</atom>
+      <list type="Node">1 .group 0 ""</list>
+      <list type="Node">1 toolType @TOOL_NAME@</list>
+      <list type="Node">-1 .endgroup </list>
+    </hash>
+  </atom>
+  <atom type="Attributes">
+    <hash type="Sheet" key="@TOOL_NAME@:sheet">
+        <atom type="Label">@TOOL_NAME@</atom>
+        <atom type="Filter">@TOOL_NAME@:filterPreset</atom>
+        <atom type="Group">toolprops/edit</atom>
+        <hash type="InCategory" key="toolprops:general#head">
+          <atom type="Ordinal">100.70</atom>
+        </hash>
+        <list type="Control" val="ref item-common:sheet"/>
+        <list type="Control" val="div "/>
+        @ATTR_LIST@
+    </hash>
+  </atom>
+</configuration>

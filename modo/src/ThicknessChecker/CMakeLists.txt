@@ -1,1 +1,5 @@
-add_modo_plugin(thicknessChecker "thickness.cxx")
+if (NOT BUILD_THICKNESS_CHECKER)
+    print_note("Thickness Checker is not being built, as it's just demo code." "Set `BUILD_THICKNESS_CHECKER` to 1 to build.")
+else()
+    add_modo_plugin(thicknessChecker "thickness.cxx")
+endif()
