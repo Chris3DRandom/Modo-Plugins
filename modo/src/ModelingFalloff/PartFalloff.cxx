@@ -3,6 +3,7 @@
 #include <lxsdk/lx_draw.hpp>
 #include <lxsdk/lx_handles.hpp>
 #include <lxsdk/lx_layer.hpp>
+#include <lxsdk/lx_log.hpp>
 
 #include <array>
 #include <cassert>
@@ -15,21 +16,34 @@ namespace global
     {
         static std::string const tool{ "part.falloff" };
         static std::string const packet{ "part.falloff.packet" };
+        static std::string const package{ "part.falloff.item" };
+        static std::string const instance{ "part.falloff.inst" };
+        static std::string const falloff{ "part.falloff.falloff" };
+        static std::string const modifier{ "part.falloff.mod" };
 
         static constexpr int startPt = 0x01000;
         static constexpr int endPt   = 0x01001;
         static constexpr int steps   = LXiHITPART_INVIS;
     }  // namespace id
 
+    namespace drawing
+    {
+        static LXtVector ToolColor{ 0.8, 0.6, 1.0 };
+        static double    PixelWidth = 50.0;
+        static uint32_t  Steps      = 4u;
+    }  // namespace drawing
+
     namespace attrs
     {
         static std::string const mode{ "mode" };
-        static std::string const startX{ "start.x" };
-        static std::string const startY{ "start.y" };
-        static std::string const startZ{ "start.z" };
-        static std::string const endX{ "end.x" };
-        static std::string const endY{ "end.y" };
-        static std::string const endZ{ "end.z" };
+        static std::string const start{ "start" };
+        static std::string const startX{ "start.X" };
+        static std::string const startY{ "start.Y" };
+        static std::string const startZ{ "start.Z" };
+        static std::string const end{ "end" };
+        static std::string const endX{ "end.X" };
+        static std::string const endY{ "end.Y" };
+        static std::string const endZ{ "end.Z" };
         static std::string const seed{ "seed" };
         static std::string const scale{ "scale" };
 
@@ -43,6 +57,109 @@ namespace global
     LXtTextValueHint falloffModes[] = { { static_cast<uint32_t>(FalloffMode::Position), "Position" },
                                         { static_cast<uint32_t>(FalloffMode::Random), "Random" },
                                         { -1, NULL } };
+    template <typename T>
+    static T evalFalloff(const component::PartMap& map, const ToolSettings& settings, component::Cache& cache, uint32_t part)
+    {
+        T defaultWght{ 1.0 };
+        if (map.empty())
+            return defaultWght;
+
+        auto val = cache.get(part);
+        if (val)
+            return settings.scale * val.value();
+
+        auto cacheAndReturn = [&](T w)
+        {
+            cache.set(part, w);
+            return w * settings.scale;
+        };
+
+        CLxEaseFraction remap;
+        CLxPerlin<T>    noise(4, 1, 1, settings.seed);
+        CLxVector       v;
+
+        auto* partData = map.get(part);
+        assert(partData);
+
+        switch (settings.mode)
+        {
+            case global::FalloffMode::Random:
+                return cacheAndReturn(noise.eval(partData->center));
+
+            case global::FalloffMode::Position:
+                v = settings.maxPos - settings.minPos;
+                remap.set_shape(LXiESHP_LINEAR);
+
+                auto offsetVec = partData->center - settings.minPos;
+                auto num       = offsetVec.dot(v);
+                auto den       = v.lengthSquared();
+                if (den)
+                    return cacheAndReturn(remap.evaluate(num / den));
+        }
+
+        return cacheAndReturn(defaultWght);
+    }
+
+    struct DrawInfo
+    {
+        CLxVector  startPos;
+        CLxVector  endPos;
+        CLxVector  eyeVector;
+        double     height3D;
+        LXtVector4 color;
+    };
+
+    static void drawSteps(ILxUnknownID drawIFC, const DrawInfo& drawInfo)
+    {
+        CLxUser_StrokeDraw stroke(drawIFC);
+        CLxUser_View       view(drawIFC);
+
+        if (!stroke.test())
+        {
+            // This shbould never happen,
+            // but apparently it does!
+            assert(false);
+            return;
+        }
+
+        // We want to draw steps that start at the end and go down to the start..
+        // We need to know the direction to offset the step height, which is the
+        // cross between the start-end vector and the view's eye vector.
+        CLxVector delta = drawInfo.endPos - drawInfo.startPos;
+        double    dLen  = delta.length();
+
+        delta.normalize();
+        auto upVec = drawInfo.eyeVector.cross(delta);
+        upVec.normalize();
+
+        double stepWidth  = dLen / (drawing::Steps);
+        double stepHeight = drawInfo.height3D / (drawing::Steps);
+
+        // stroke.SetPart(global::id::steps);
+        stroke.Begin(LXiSTROKE_LINE_LOOP, drawInfo.color, drawInfo.color[3]);
+        stroke.Vert(const_cast<double*>(drawInfo.endPos.v));
+
+        CLxVector fullOffset = upVec * drawInfo.height3D;
+        stroke.Vert(fullOffset, LXiSTROKE_RELATIVE);
+
+        CLxVector stepRun  = delta * stepWidth;
+        CLxVector stepRise = upVec * stepHeight;
+        CLxVector runInv   = stepRun * -1.0;
+        CLxVector riseInv  = stepRise * -1.0;
+        for (auto i = 0; i < drawing::Steps; ++i)
+        {
+            stroke.Vert(runInv, LXiSTROKE_RELATIVE);
+            stroke.Vert(riseInv, LXiSTROKE_RELATIVE);
+        }
+
+        stroke.Vert(riseInv, LXiSTROKE_RELATIVE);
+        for (auto i = 0; i < drawing::Steps; ++i)
+        {
+            stroke.Vert(stepRun, LXiSTROKE_RELATIVE);
+            if (i != (drawing::Steps - 1))
+                stroke.Vert(riseInv, LXiSTROKE_RELATIVE);
+        }
+    }
 
 }  // namespace global
 
@@ -66,6 +183,23 @@ namespace com
             srv->AddInterface(new CLxIfc_FalloffPacket<partFalloff::Packet>);
             lx::AddSpawner(global::id::packet.c_str(), srv);
         }
+
+        static void item()
+        {
+            CLxGenericPolymorph* srv = new CLxPolymorph<falloffItem::Package>;
+            srv->AddInterface(new CLxIfc_Package<falloffItem::Package>);
+            srv->AddInterface(new CLxIfc_StaticDesc<falloffItem::Package>);
+            lx::AddServer(global::id::package.c_str(), srv);
+
+            srv = new CLxPolymorph<falloffItem::Instance>;
+            srv->AddInterface(new CLxIfc_PackageInstance<falloffItem::Instance>);
+            srv->AddInterface(new CLxIfc_ViewItem3D<falloffItem::Instance>);
+            lx::AddSpawner(global::id::instance.c_str(), srv);
+
+            CLxSpawner_Falloff<falloffItem::Falloff>(global::id::falloff.c_str());
+
+            CLxExport_ItemModifierServer<CLxObjectRefModifier<falloffItem::Modifier>>::Define(global::id::modifier.c_str());
+        }
     }  // namespace init
 
     namespace spawn
@@ -75,7 +209,29 @@ namespace com
             static CLxSpawner<partFalloff::Packet> spawner(global::id::packet.c_str());
             return spawner.Alloc(ppvObj);
         }
+
+        static falloffItem::Instance* instance(void** ppvObj)
+        {
+            static CLxSpawner<falloffItem::Instance> spawner(global::id::instance.c_str());
+            return spawner.Alloc(ppvObj);
+        }
+
+        static falloffItem::Falloff* falloff(ILxUnknownID& obj)
+        {
+            static CLxSpawner<falloffItem::Falloff> spawner(global::id::falloff.c_str());
+            return spawner.Alloc(obj);
+        }
+
     }  // namespace spawn
+
+    namespace test
+    {
+        static LxResult instance(const LXtGUID* guid)
+        {
+            static CLxSpawner<falloffItem::Instance> spawner(global::id::instance.c_str());
+            return spawner.TestInterfaceRC(guid);
+        }
+    }  // namespace test
 }  // namespace com
 
 namespace component
@@ -193,17 +349,20 @@ namespace component
 
     std::optional<double> Cache::get(uint32_t part)
     {
-        auto it = m_weights.find(part);
+        std::scoped_lock<std::mutex> scopeLock(m_lock);
+        auto                         it = m_weights.find(part);
         return it != m_weights.end() ? it->second : std::optional<double>{};
     }
 
     void Cache::set(uint32_t part, double weight)
     {
+        std::scoped_lock<std::mutex> scopeLock(m_lock);
         m_weights[part] = weight;
     }
 
     void Cache::clear()
     {
+        std::scoped_lock<std::mutex> scopeLock(m_lock);
         m_weights.clear();
     }
 
@@ -292,60 +451,6 @@ namespace partFalloff
         return LXfTMOD_DRAW_3D | LXfTMOD_I0_INPUT;
     }
 
-    static void drawSteps(ILxUnknownID drawIFC, const CLxVector& start, const CLxVector& end)
-    {
-        static LXtVector STEP_COLOR{ 0.8, 0.6, 1.0 };
-        static double    PIXEL_WIDTH = 50.0;
-        static uint32_t  STEP_COUNT  = 4u;
-
-        CLxUser_StrokeDraw stroke(drawIFC);
-        CLxUser_View       view(drawIFC);
-        assert(stroke.test() && view.test());
-
-        // We want to draw steps that start at the end and go down to the start..
-        // We need to know the direction to offset the step height, which is the
-        // cross between the start-end vector and the view's eye vector.
-        CLxVector delta = end - start;
-        double    dLen  = delta.length();
-        CLxVector midPt = (end + start) / 2.0;
-        CLxVector crossVec;
-        view.EyeVector(midPt.v, crossVec.v);
-
-        crossVec.normalize();
-        delta.normalize();
-        auto upVec = crossVec.cross(delta);
-        upVec.normalize();
-
-        double height3d   = PIXEL_WIDTH * view.PixelScale();
-        double stepWidth  = dLen / (STEP_COUNT);
-        double stepHeight = height3d / (STEP_COUNT);
-
-        stroke.SetPart(global::id::steps);
-        stroke.Begin(LXiSTROKE_LINE_LOOP, STEP_COLOR, 1.0);
-        stroke.Vert(const_cast<double*>(end.v));
-
-        CLxVector fullOffset = upVec * height3d;
-        stroke.Vert(fullOffset, LXiSTROKE_RELATIVE);
-
-        CLxVector stepRun  = delta * stepWidth;
-        CLxVector stepRise = upVec * stepHeight;
-        CLxVector runInv   = stepRun * -1.0;
-        CLxVector riseInv  = stepRise * -1.0;
-        for (auto i = 0; i < STEP_COUNT; ++i)
-        {
-            stroke.Vert(runInv, LXiSTROKE_RELATIVE);
-            stroke.Vert(riseInv, LXiSTROKE_RELATIVE);
-        }
-
-        stroke.Vert(riseInv, LXiSTROKE_RELATIVE);
-        for (auto i = 0; i < STEP_COUNT; ++i)
-        {
-            stroke.Vert(stepRun, LXiSTROKE_RELATIVE);
-            if (i != (STEP_COUNT - 1))
-                stroke.Vert(riseInv, LXiSTROKE_RELATIVE);
-        }
-    }
-
     void Tool::tmod_Draw(ILxUnknownID, ILxUnknownID stroke, int)
     {
         if (getAttr<int>(global::attrs::mode) != static_cast<int>(global::FalloffMode::Position))
@@ -359,7 +464,24 @@ namespace partFalloff
         auto end = getAttr<CLxVector>(global::attrs::endX);
         draw.Handle(end.v, nullptr, global::id::endPt, 0);
 
-        drawSteps(stroke, start, end);
+        CLxUser_View view(stroke);
+        if (!view.test())
+        {
+            assert(false);
+            return;
+        }
+
+        global::DrawInfo info;
+        info.startPos = start;
+        info.endPos   = end;
+        info.height3D = global::drawing::PixelWidth * view.PixelScale();
+        LXx_VCPY(info.color, global::drawing::ToolColor);
+        info.color[3] = 1.0;
+
+        CLxVector midPt = (end + start) / 2.0;
+        view.EyeVector(midPt.v, info.eyeVector.v);
+
+        global::drawSteps(stroke, info);
     }
 
     void Tool::tmod_Test(ILxUnknownID vts, ILxUnknownID stroke, int flags)
@@ -486,50 +608,179 @@ namespace partFalloff
         if (!vrx || !m_pointAcc.test() || m_partData.empty())
             return 1.0;
 
-        uint32_t currentPart{};
+        uint32_t part;
         m_pointAcc.Select(vrx);
-        m_pointAcc.Part(&currentPart);
+        m_pointAcc.Part(&part);
 
-        auto val = m_weightCache.get(currentPart);
-        if (val)
-            return m_settings.scale * val.value();
-
-        auto cacheAndReturn = [&](double w)
-        {
-            m_weightCache.set(currentPart, w);
-            return w * m_settings.scale;
-        };
-
-        CLxEaseFraction   remap;
-        CLxPerlin<double> noise(4, 1, 1, m_settings.seed);
-        CLxVector         v;
-
-        auto* part = m_partData.get(currentPart);
-        assert(part);
-
-        switch (m_settings.mode)
-        {
-            case global::FalloffMode::Random:
-                return cacheAndReturn(noise.eval(part->center));
-
-            case global::FalloffMode::Position:
-                v = m_settings.maxPos - m_settings.minPos;
-                remap.set_shape(LXiESHP_LINEAR);
-
-                auto offsetVec = part->center - m_settings.minPos;
-                auto num       = offsetVec.dot(v);
-                auto den       = v.lengthSquared();
-                if (den)
-                    return cacheAndReturn(remap.evaluate(num / den));
-        }
-
-        return cacheAndReturn(1.0);
+        return global::evalFalloff<double>(m_partData, m_settings, m_weightCache, part);
     }
 
 }  // namespace partFalloff
+
+namespace falloffItem
+{
+    LxResult Package::pkg_SetupChannels(ILxUnknownID addChan)
+    {
+        CLxUser_AddChannel ac(addChan);
+
+        ac.NewChannel(global::attrs::mode.c_str(), LXsTYPE_INTEGER);
+        ac.SetDefault(0.0, 0);
+        ac.SetHint(global::falloffModes);
+
+        ac.NewChannel(global::attrs::start.c_str(), LXsTYPE_DISTANCE);
+        ac.SetVector(LXsCHANVEC_XYZ);
+
+        CLxVector endDefault(0.0, 1.0, 0.0);
+        ac.NewChannel(global::attrs::end.c_str(), LXsTYPE_DISTANCE);
+        ac.SetVector(LXsCHANVEC_XYZ);
+        ac.SetDefaultVec(endDefault);
+
+        ac.NewChannel(global::attrs::seed.c_str(), LXsTYPE_INTEGER);
+        ac.SetDefault(0.0, 1701);
+
+        ac.NewChannel(global::attrs::scale.c_str(), LXsTYPE_PERCENT);
+        ac.SetDefault(1.0, 0);
+        return LXe_OK;
+    }
+
+    LxResult Package::pkg_TestInterface(const LXtGUID* guid)
+    {
+        return com::test::instance(guid);
+    }
+
+    LxResult Package::pkg_Attach(void** ppvObj)
+    {
+        com::spawn::instance(ppvObj);
+        return LXe_OK;
+    }
+
+    LXtTagInfoDesc Package::descInfo[] = { { LXsPKG_SUPERTYPE, LXsITYPE_FALLOFF }, { nullptr } };
+
+    LxResult Instance::pins_Initialize(ILxUnknownID item, ILxUnknownID)
+    {
+        m_item.set(item);
+        return LXe_OK;
+    }
+
+    void Instance::pins_Cleanup(void)
+    {
+        m_item.clear();
+    }
+
+    LxResult Instance::vitm_Draw(ILxUnknownID chanRead, ILxUnknownID draw, int sel, const LXtVector color)
+    {
+        CLxUser_ChannelRead read(chanRead);
+        assert(read.test() && m_item.test());
+
+        auto readVec = [&](CLxVector& v, uint32_t idx)
+        {
+            for (auto i = 0; i < 3; ++i)
+                v[i] = read.FValue(m_item, idx++);
+        };
+
+        global::DrawInfo info;
+
+        readVec(info.startPos, m_item.ChannelIndex(global::attrs::startX.c_str()));
+        readVec(info.endPos, m_item.ChannelIndex(global::attrs::endX.c_str()));
+        info.height3D = 0.25;
+        info.eyeVector.set(1.0, 0.0, 0.0);
+        LXx_VCPY(info.color, color);
+        info.color[3] = sel == 0 ? 0.5 : 1.0;
+
+        global::drawSteps(draw, info);
+        info.eyeVector.set(0.0, 0.0, 1.0);
+        global::drawSteps(draw, info);
+
+        return LXe_OK;
+    }
+
+    float Falloff::fall_WeightF(const LXtFVector position, LXtPointID vrx, LXtPolygonID polygon)
+    {
+        if (!vrx || !m_pointAcc.test() || m_partData.empty())
+            return 1.0;
+
+        uint32_t part{};
+        m_lock.lock();
+        m_pointAcc.Select(vrx);
+        m_pointAcc.Part(&part);
+        m_lock.unlock();
+
+        return global::evalFalloff<float>(m_partData, settings, m_weightCache, part);
+    }
+
+    LxResult Falloff::fall_WeightRun(const float** pos, const LXtPointID* points, const LXtPolygonID* polygons, float* weight, unsigned num)
+    {
+        for (auto i = 0u; i < num; ++i)
+            weight[i] = fall_WeightF(pos[i], points[i], polygons ? polygons[0] : nullptr);
+
+        return LXe_OK;
+    }
+
+    LxResult Falloff::fall_SetMesh(ILxUnknownID meshObj, LXtMatrix4 xfrm)
+    {
+        std::lock_guard<std::mutex> scopeLock(m_lock);
+        CLxUser_Mesh                mesh(meshObj);
+        if (!mesh.test())
+            return LXe_FAILED;
+        m_partData.buildFromMesh(mesh);
+        m_pointAcc.fromMesh(mesh);
+
+        return LXe_OK;
+    }
+
+    const char* Modifier::ItemType()
+    {
+        return global::id::package.c_str();
+    }
+
+    const char* Modifier::Channel()
+    {
+        return LXsICHAN_FALLOFF_FALLOFF;
+    }
+
+    void Modifier::Attach(CLxUser_Evaluation& eval, ILxUnknownID itemObj)
+    {
+        CLxUser_Item item(itemObj);
+
+        eval.AddChan(item, LXsICHAN_XFRMCORE_WORLDMATRIX);
+
+        for (auto const& [name, type] : global::attrs::typeMap)
+            eval.AddChan(item, name.c_str());
+    }
+
+    void Modifier::Alloc(CLxUser_Evaluation&, CLxUser_Attributes& attr, unsigned firstIdx, ILxUnknownID& obj)
+    {
+        uint32_t idx = firstIdx;
+
+        auto readVec = [&]()
+        {
+            CLxVector v;
+            for (auto i = 0; i < 3; ++i)
+                attr.GetFlt(idx++, &v.v[i]);
+            return v;
+        };
+
+        CLxMatrix4     mat;
+        CLxUser_Matrix m;
+        attr.ObjectRO(idx++, m);
+        m.Get4(mat.m);
+
+        auto* falloff = com::spawn::falloff(obj);
+
+        falloff->settings.mode   = static_cast<global::FalloffMode>(attr.Int(idx++));
+        falloff->settings.minPos = mat * readVec();
+        falloff->settings.minPos += mat.getTranslation();
+        falloff->settings.maxPos = mat * readVec();
+        falloff->settings.maxPos += mat.getTranslation();
+        falloff->settings.scale = attr.Float(idx++);
+        falloff->settings.seed  = attr.Int(idx++);
+    }
+
+}  // namespace falloffItem
 
 void initialize()
 {
     com::init::tool();
     com::init::packet();
+    com::init::item();
 }

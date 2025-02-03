@@ -1,5 +1,8 @@
 #pragma once
 
+// Mixed MSVC versions between us and modo can break mutex functionality
+#define _DISABLE_CONSTEXPR_MUTEX_CONSTRUCTOR
+
 #include <lxsdk/ex_toolPacketWrap.hpp>
 
 #include <lxsdk/lx_tool.hpp>
@@ -9,9 +12,12 @@
 #include <lxsdk/lx_vp.hpp>
 #include <lxsdk/lxidef.h>
 #include <lxsdk/lxu_attrdesc.hpp>
+#include <lxsdk/lxu_deform.hpp>
 #include <lxsdk/lxu_math.hpp>
+#include <lxsdk/lxu_modifier.hpp>
 #include <lxsdk/lxu_vector.hpp>
 
+#include <mutex>
 #include <optional>
 #include <string>
 #include <type_traits>
@@ -117,6 +123,7 @@ namespace component
 
     private:
         std::unordered_map<uint32_t, double> m_weights;
+        std::mutex                           m_lock;
     };
 }  // namespace component
 
@@ -184,6 +191,58 @@ namespace partFalloff
     };
 
 }  // namespace partFalloff
+
+namespace falloffItem
+{
+    class Package : public CLxImpl_Package
+    {
+    public:
+        static LXtTagInfoDesc descInfo[];
+
+        Package() = default;
+        LxResult pkg_SetupChannels(ILxUnknownID addChan) override;
+        LxResult pkg_TestInterface(const LXtGUID* guid) override;
+        LxResult pkg_Attach(void** ppvObj) override;
+    };
+
+    class Instance : public CLxImpl_PackageInstance, public CLxImpl_ViewItem3D
+    {
+    public:
+        CLxUser_Item m_item;
+
+        LxResult pins_Initialize(ILxUnknownID item, ILxUnknownID super) override;
+        void     pins_Cleanup(void) override;
+
+        LxResult vitm_Draw(ILxUnknownID read, ILxUnknownID draw, int sel, const LXtVector color) override;
+    };
+
+    class Falloff : public CLxImpl_Falloff
+    {
+    public:
+        global::ToolSettings settings;
+
+        float    fall_WeightF(const LXtFVector position, LXtPointID point, LXtPolygonID polygon) override;
+        LxResult fall_WeightRun(const float** pos, const LXtPointID* points, const LXtPolygonID* polygons, float* weight, unsigned num) override;
+        LxResult fall_SetMesh(ILxUnknownID mesh, LXtMatrix4 xfrm) override;
+
+    private:
+        component::PartMap m_partData;
+        component::Cache   m_weightCache;
+        CLxUser_Point      m_pointAcc;
+        std::mutex         m_lock;
+    };
+
+    class Modifier : public CLxObjectRefModifierCore
+    {
+    public:
+        const char* ItemType() override;
+        const char* Channel() override;
+
+        void Attach(CLxUser_Evaluation&, ILxUnknownID) override;
+        void Alloc(CLxUser_Evaluation&, CLxUser_Attributes&, unsigned, ILxUnknownID&) override;
+    };
+
+}  // namespace falloffItem
 
 // Plugin Registration called by modo on startup
 void initialize();
